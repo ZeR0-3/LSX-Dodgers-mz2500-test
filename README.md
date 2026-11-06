@@ -1,13 +1,17 @@
+> **安定版(大改造前)**: BDOS=CF06H、TPA約52KB、ハードスクロール入り。大改造は別ツリーで進めています。
+
 # LSX-Dodgers for SHARP MZ-2500
 
 CP/M-80 / MSX-DOS 互換OS **LSX-Dodgers**(原作: Gaku 氏)を **SHARP MZ-2500** に移植したものです。
 MZ-700/1500 版(`M7*.ASM`)を土台に、機種依存部を `src/M25*.ASM` に置き換えています(共通部 `LD*.ASM` は無改造)。
 
 > **状態: v0.1(エミュレータで動作確認済み / 実機では未確認)**
-> mz2500-web-emulator の CLI(実IPL ROM で起動)で、起動、`DIR`、`COPY`、`FORMAT`、各ドライブの読み書きなど 68 項目の自動テストが通ります。**実機での動作は確認できていません。**
+> mz2500-web-emulator の CLI(実IPL ROM で起動)で、起動、`DIR`、`COPY`、`FORMAT`、各ドライブの読み書きなど 73 項目の自動テストが通ります。**実機での動作は確認できていません。**
 
 ## できること
 - 実IPLから起動 → LSX のプロンプト。80桁/40桁表示、カーソル点滅、LOCK / カナキー、ビープ、`MON`(IOCS の ROM モニタ呼び出し)
+- 80桁はテキスト面のハードウェアスクロール(CRT-C の表示開始セル)を使用(エミュレータで確認、実機は未確認)
+- TPA(プログラム領域)は 0100H-C005H(約48KB)
 - X1 / MZ-700 の LSX で作った標準形式の 2D/2DD(512B×9セクタ、BPB)をそのまま読み書き。物理フォーマット対応
 - ワイルドカード、階層ディレクトリなど LSX 本体の機能
 
@@ -41,17 +45,17 @@ MZ-700/1500 版(`M7*.ASM`)を土台に、機種依存部を `src/M25*.ASM` に�
 - 動作確認には [mz2500-web-emulator](https://github.com/zabaglione/mz2500-web-emulator) と、**自分で用意した MZ-2500 の IPL ROM など**(ROM は同梱できません)
 
 ```bash
-tools/setup_env.sh <作業dir> <z88dk作業ツリー> <mz2500-web-emulator.zip> <ROMS.zip>   # z80asm とエミュレータCLIを用意
+tools/setup_env.sh <作業dir> <z88dk作業ツリー> <mz2500-web-emulator.zip> <ROMを入れたzipまたはdir>   # z80asm とエミュレータCLIを用意
 source <作業dir>/env.sh
 tools/build_all.sh <LSX-Dodgers原本dir> <ldsys.d88> <出力dir>                      # 起動ディスク(.d88)4種を作る
-tools/test_all.sh <出力dir>                                                         # 自動テスト 68 本(約12分)
+tools/test_all.sh <出力dir>                                                         # 自動テスト 73 本(約12分)
 ```
 出力: `LSX2500_80col.d88`(推奨)、`LSX2500_40col.d88`、`LSX2500_40col_noiocs.d88`、`LSX2500_80col_noiocs.d88`。
 
 ## ドキュメント
 - [docs/hardware-notes.md](docs/hardware-notes.md): 確認済みのハード仕様と根拠
 - [docs/porting-notes.md](docs/porting-notes.md): 起動の仕組み、デバッグで判明した事項
-
+- [docs/HANDOFF.md](docs/HANDOFF.md): 状況表、判断の経緯、次にやること
 
 ## 謝辞
 - **LSX-Dodgers**(作者: Gaku 氏、[tablacus/LSX-Dodgers](https://github.com/tablacus/LSX-Dodgers) で公開)。この移植はすべてその設計と共通部ソースの上に成り立っています。

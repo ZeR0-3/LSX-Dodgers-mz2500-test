@@ -43,7 +43,7 @@ L36-41  FAT×2   L42-48 ルートDIR   L49- データ(LD2500.BIN は先頭クラ
 7. キー走査は `E8h` を読み戻して上位3ビットを保持し、bit4=1+列を書く。
 
 ## 再現・テスト(引き継ぎは `HANDOFF.md` と `hardware-notes.md` を参照)
-    tools/setup_env.sh <作業dir> <z88dk.tgz か git 作業ツリー> <mz2500-web-emulator.zip> <ROMS.zip>   # z80asm とエミュレータCLIを作る
+    tools/setup_env.sh <作業dir> <z88dk.tgz か git 作業ツリー> <mz2500-web-emulator.zip> <ROMを入れたzipまたはdir>   # z80asm とエミュレータCLIを作る
     source <作業dir>/env.sh
     tools/build_all.sh <原本dir> <ldsys.d88> <出力dir>                              # 4種類の起動ディスクをビルド
     tools/test_all.sh <出力dir>                                                     # 実IPLで起動して DIR/COPY/ディスク無し/物理フォーマット/MODE無害/カーソル点滅/ワイルドカード/LOCK・カナ/エラー復帰/MONを確認(64本)

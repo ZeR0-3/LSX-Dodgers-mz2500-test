@@ -144,21 +144,23 @@ done
 
 # F:を使い切り、E:は64KB/128KBを超えるまで書いて、最初と最後のファイルが一致すること(アドレス上位の検証)
 for f in "$D"/LSX2500_80col.d88; do
-  want=$(python3 "$HERE/d88_cat.py" "$f" LD2500.BIN | md5sum)
+  # コピー元は9088バイト(128の倍数)の固定ファイル。LD2500.BINの大きさは本体の配置で変わるので使わない
+  python3 -c "open('/tmp/_f9k.bin','wb').write(bytes((i*7+i//251)%256 for i in range(9088)))"
+  want=$(md5sum < /tmp/_f9k.bin)
   for drv in f e; do
     N=12; t=600; args=()
     if [ $drv = e ]; then N=15; t=1300; args+=(--type 'format e:\r:500' --type '\r:800' --type '\r:1000'); fi
-    for i in $(seq 1 $N); do args+=(--type "copy a:ld2500.bin $drv:f$i.bin\r:$t"); t=$((t+300)); done
+    for i in $(seq 1 $N); do args+=(--type "copy b:src.bin $drv:f$i.bin\r:$t"); t=$((t+300)); done
     args+=(--type "copy $drv:f$N.bin b:last.bin\r:$t"); t=$((t+400))
     args+=(--type "copy $drv:f1.bin b:first.bin\r:$t"); t=$((t+400))
-    python3 "$HERE/make_blank_disk.py" /tmp/_mb.d88 2dd >/dev/null
+    python3 "$HERE/make_blank_disk.py" /tmp/_mb.d88 2dd >/dev/null; python3 "$HERE/d88_put.py" /tmp/_mb.d88 /tmp/_f9k.bin SRC.BIN >/dev/null
     "$LSX_CLI" --real-ipl --rom-dir "$LSX_ROMDIR" --disk-a "$f" --disk-b /tmp/_mb.d88 --disk-save 1:/tmp/_mo.d88 --frames $((t+300)) "${args[@]}" >/dev/null 2>&1
     g1=$(python3 "$HERE/d88_cat.py" /tmp/_mo.d88 FIRST.BIN | md5sum); g2=$(python3 "$HERE/d88_cat.py" /tmp/_mo.d88 LAST.BIN | md5sum)
     if [ "$g1" = "$want" ] && [ "$g2" = "$want" ]; then echo "PASS $(basename $f) ${drv^^}: ${N}ファイル(全域)の先頭と末尾が一致"; else echo "FAIL $(basename $f) ${drv^^}: 全域"; rc=1; fi
   done
 done
 
-# F:から約50KBのCOM(TPAのC000h付近=旧RAMディスクの中継バッファ位置まで)を読み込んで実行できること。自分のデータの和を検算して LOAD OK を出す。
+# F:から約50KBのCOM(TPAのC000h付近まで。旧RAMディスクの中継バッファはC000h付近にあった)を読み込んで実行できること。自分のデータの和を検算して LOAD OK を出す。
 # バッファがバンク0-5を順に通るので、窓バンク(5/3)の両方の経路を通る
 for f in "$D"/LSX2500_*.d88; do
   python3 "$HERE/make_big_com.py" /tmp/_big.com 50500
@@ -167,5 +169,29 @@ for f in "$D"/LSX2500_*.d88; do
     --type 'copy b:big.com f:\r:700' --type 'f:big\r:3300' --screen-report 2>&1 | grep '^screen:')
   if echo "$out" | grep -q "LOAD OK"; then echo "PASS $(basename $f) F:から50KBのCOMを読み込んで実行"
   else echo "FAIL $(basename $f) F:から50KBのCOMを実行"; echo "$out" | tail -4; rc=1; fi
+done
+
+# ハードウェアスクロール(80桁): 200行を type して (1) 約1700フレーム以内に終わる(従来の画面コピー方式は約2100フレーム) (2) 終了後に最後の行が残る
+# (3) COM起動(mode)で表示開始セルが0へ戻り、画面の文字は保たれる。40桁は従来のコピー方式のまま(スクロール後も最終行が見える)
+python3 -c "open('/tmp/_long.txt','w').write(''.join('LINE %03d abcdefghijklmnopqrstuvwxyz 0123456789\r\n'%i for i in range(1,201))+'\x1a')"
+python3 "$HERE/make_blank_disk.py" /tmp/_lb.d88 2dd >/dev/null; python3 "$HERE/d88_put.py" /tmp/_lb.d88 /tmp/_long.txt LONG.TXT
+for f in "$D"/LSX2500_80col.d88 "$D"/LSX2500_80col_noiocs.d88 "$D"/LSX2500_40col.d88; do
+  out=$("$LSX_CLI" --real-ipl --rom-dir "$LSX_ROMDIR" --disk-a "$f" --disk-b /tmp/_lb.d88 --frames 1700 --type 'type b:long.txt\r:600' --screen-report 2>&1 | grep '^screen:')
+  case $(basename $f) in
+    *80col*) if echo "$out" | grep -q "LINE 200" && echo "$out" | tail -1 | grep -q "A>"; then echo "PASS $(basename $f) ハードスクロール: 200行がフレーム1700以内に完了"
+             else echo "FAIL $(basename $f) ハードスクロール速度/表示"; echo "$out" | tail -3; rc=1; fi ;;
+    *) out=$("$LSX_CLI" --real-ipl --rom-dir "$LSX_ROMDIR" --disk-a "$f" --disk-b /tmp/_lb.d88 --frames 3600 --type 'type b:long.txt\r:600' --screen-report 2>&1 | grep '^screen:')
+       if echo "$out" | grep -q "LINE 200" && echo "$out" | tail -1 | grep -q "A>"; then echo "PASS $(basename $f) 200行のtype(従来のコピー方式)"
+       else echo "FAIL $(basename $f) 200行のtype"; echo "$out" | tail -3; rc=1; fi ;;
+  esac
+done
+for f in "$D"/LSX2500_80col.d88 "$D"/LSX2500_80col_noiocs.d88; do
+  out=$("$LSX_CLI" --real-ipl --rom-dir "$LSX_ROMDIR" --disk-a "$f" --disk-b /tmp/_lb.d88 --frames 2300 \
+    --type 'type b:long.txt\r:600' --type 'mode 40\r:1750' --screen-report --crtc-report 2>&1)
+  st=$(echo "$out" | grep '^crtc:' | sed 's/.*\$01=\([0-9a-f]*\) \$02=\([0-9a-f]*\).*/\1:\2/')
+  # COM起動で0:0に戻り、その後 mode の出力ぶん(1〜2行)しかスクロールしていないこと(0x50 か 0xa0 まで)
+  if echo "$out" | grep -q "LINE 199" && echo "$out" | grep -q "mode v1.00" && { [ "$st" = "50:00" ] || [ "$st" = "a0:00" ] || [ "$st" = "00:00" ]; }; then
+    echo "PASS $(basename $f) COM起動で表示開始セルを0へ戻す (start=$st)"
+  else echo "FAIL $(basename $f) COM起動でのスクロール正規化 (start=$st)"; echo "$out" | grep '^screen:' | tail -4; rc=1; fi
 done
 exit $rc
