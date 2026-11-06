@@ -4,7 +4,7 @@ CP/M-80 / MSX-DOS 互換OS **LSX-Dodgers**(原作: Gaku 氏)を **SHARP MZ-2500*
 MZ-700/1500 版(`M7*.ASM`)を土台に、機種依存部を `src/M25*.ASM` に置き換えています(共通部 `LD*.ASM` は無改造)。
 
 > **状態: v0.1(エミュレータで動作確認済み / 実機では未確認)**
-> mz2500-web-emulator の CLI(実IPL ROM で起動)で、起動、`DIR`、`COPY`、`FORMAT`、各ドライブの読み書きなど 64 項目の自動テストが通ります。**実機での動作は確認できていません。**
+> mz2500-web-emulator の CLI(実IPL ROM で起動)で、起動、`DIR`、`COPY`、`FORMAT`、各ドライブの読み書きなど 68 項目の自動テストが通ります。**実機での動作は確認できていません。**
 
 ## できること
 - 実IPLから起動 → LSX のプロンプト。80桁/40桁表示、カーソル点滅、LOCK / カナキー、ビープ、`MON`(IOCS の ROM モニタ呼び出し)
@@ -44,7 +44,7 @@ MZ-700/1500 版(`M7*.ASM`)を土台に、機種依存部を `src/M25*.ASM` に�
 tools/setup_env.sh <作業dir> <z88dk作業ツリー> <mz2500-web-emulator.zip> <ROMS.zip>   # z80asm とエミュレータCLIを用意
 source <作業dir>/env.sh
 tools/build_all.sh <LSX-Dodgers原本dir> <ldsys.d88> <出力dir>                      # 起動ディスク(.d88)4種を作る
-tools/test_all.sh <出力dir>                                                         # 自動テスト 64 本(約12分)
+tools/test_all.sh <出力dir>                                                         # 自動テスト 68 本(約12分)
 ```
 出力: `LSX2500_80col.d88`(推奨)、`LSX2500_40col.d88`、`LSX2500_40col_noiocs.d88`、`LSX2500_80col_noiocs.d88`。
 
@@ -55,7 +55,7 @@ tools/test_all.sh <出力dir>                                                   
 
 ## 謝辞
 - **LSX-Dodgers**(作者: Gaku 氏、[tablacus/LSX-Dodgers](https://github.com/tablacus/LSX-Dodgers) で公開)。この移植はすべてその設計と共通部ソースの上に成り立っています。
-- **[mz2500-web-emulator](https://github.com/zabaglione/mz2500-web-emulator)**(Zabaglione 氏): FDC/VRAM の挙動をソースで裏取りできたため、実機なしで開発・検証できました。
+- **[mz2500-web-emulator](https://github.com/zabaglione/mz2500-web-emulator)**(Zabaglione 氏): 実IPL ROM でブートでき、FDC/VRAM の挙動をソースで裏取りできたため、実機なしで開発・検証できました。
 - [z88dk](https://github.com/z88dk/z88dk) の z80asm、および MZ-2500 の資料・S-OS 移植版を公開されている方々。
 
 ## ライセンス

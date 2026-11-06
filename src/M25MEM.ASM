@@ -75,33 +75,45 @@ EMMWR:
 	RET
 
 ;	RAM DISK DRIVER (拡張RAM ページ10h-1Fh = 128KB, 512B/セクタ x 256)
-;	ページはバンク5(A000H-BFFFH)へ一時的に割り当てて RDBUF 経由でコピーする
-;	(呼び出し元のバッファやスタックがバンク5にあってもよいように、割り当て中はDIでLDIRだけを行う)
+;	ページを CPU のバンク3(6000H-)またはバンク5(A000H-)へ一時的に割り当て、呼び出し元のバッファへ直接 LDIR する。
+;	窓にするバンクは、呼び出し元バッファ(512B)の末尾がバンク5より下ならバンク5、それ以外ならバンク3
+;	(バッファと窓が重ならない)。割り当て中は DI で、スタックを使わず LDIR と OUT だけを行う
+;	(呼び出し元のスタックが窓のバンクにあっても壊れない)。コードはバンク6,7にあるので影響されない。
+;	バンク3,5の通常のページは 03h,0Bh。TPAの内側(C000H等)には何も置かない。
 
 RDRD:
 	PUSH	BC
 	PUSH	DE
-	PUSH	HL
-	CALL	RDADR		;HL=窓のアドレス A=ページ
-	LD	B,A
-	DI
-	LD	A,5
-	OUT	(0B4H),A
+	CALL	RDSEL		;B=窓バンク D=窓アドレス上位 E=ページ
 	LD	A,B
-	OUT	(0B5H),A
-	LD	DE,RDBUF
-	LD	BC,512
-	LDIR			;拡張RAM -> RDBUF
-	LD	A,5
+	DI
 	OUT	(0B4H),A
-	LD	A,RAM5_PG
-	OUT	(0B5H),A
-	EI
-	POP	DE		;DE=呼び出し元のアドレス
-	LD	HL,RDBUF
+	LD	A,E
+	OUT	(0B5H),A	;窓にページを割り当て
+	LD	E,0
+	EX	DE,HL		;HL=窓 DE=ユーザーバッファ
 	LD	BC,512
-	LDIR
-	EX	DE,HL		;HL=次のアドレス
+	LDIR			;窓 -> ユーザーバッファ  DE=次のアドレス
+	LD	H,D
+	LD	L,E
+	DEC	HL
+	LD	A,H
+	RLCA
+	RLCA
+	RLCA
+	AND	7
+	CP	5
+	LD	A,5
+	LD	C,0BH
+	JR	C,RDRD1
+	LD	A,3
+	LD	C,3
+RDRD1:
+	OUT	(0B4H),A
+	LD	A,C
+	OUT	(0B5H),A	;窓を通常のページに戻す
+	EI
+	INC	HL		;HL=次のアドレス
 	POP	DE
 	INC	DE
 	POP	BC
@@ -112,29 +124,34 @@ RDRD:
 RDWT:
 	PUSH	BC
 	PUSH	DE
-	LD	DE,RDBUF
-	LD	BC,512
-	LDIR			;呼び出し元 -> RDBUF  HL=次のアドレス
-	POP	DE
-	PUSH	DE
-	PUSH	HL
-	CALL	RDADR
-	LD	B,A
-	DI
-	LD	A,5
-	OUT	(0B4H),A
+	CALL	RDSEL
 	LD	A,B
-	OUT	(0B5H),A
-	EX	DE,HL		;DE=窓のアドレス
-	LD	HL,RDBUF
-	LD	BC,512
-	LDIR			;RDBUF -> 拡張RAM
-	LD	A,5
+	DI
 	OUT	(0B4H),A
-	LD	A,RAM5_PG
+	LD	A,E
+	OUT	(0B5H),A
+	LD	E,0		;DE=窓
+	LD	BC,512
+	LDIR			;ユーザーバッファ -> 窓  HL=次のアドレス
+	LD	D,H
+	LD	E,L
+	DEC	DE
+	LD	A,D
+	RLCA
+	RLCA
+	RLCA
+	AND	7
+	CP	5
+	LD	A,5
+	LD	C,0BH
+	JR	C,RDWT1
+	LD	A,3
+	LD	C,3
+RDWT1:
+	OUT	(0B4H),A
+	LD	A,C
 	OUT	(0B5H),A
 	EI
-	POP	HL
 	POP	DE
 	INC	DE
 	POP	BC
@@ -142,13 +159,31 @@ RDWT:
 	AND	A
 	RET
 
-RDADR:				;DE=セクタ(0-255) -> A=ページ(10h+セクタ/16) HL=A000h+(セクタ%16)*512
+RDSEL:				;HL=ユーザーバッファ E=セクタ(0-255) -> B=窓バンク(5か3) D=窓アドレス上位 E=ページ(10h+セクタ/16)。HL保存
+	PUSH	HL
+	LD	BC,511
+	ADD	HL,BC
+	LD	A,H
+	RLCA
+	RLCA
+	RLCA
+	AND	7		;A=バッファ末尾のバンク
+	CP	5
+	LD	B,5
+	JR	C,RDSEL1
+	LD	B,3
+RDSEL1:
+	POP	HL
 	LD	A,E
 	AND	00FH
-	ADD	A,A
-	ADD	A,0A0H
-	LD	H,A
-	LD	L,0
+	ADD	A,A		;(セクタ%16)*512 の上位バイト
+	LD	D,A
+	LD	A,B
+	RRCA
+	RRCA
+	RRCA			;バンク*32 = 窓の先頭アドレスの上位バイト
+	ADD	A,D
+	LD	D,A
 	LD	A,E
 	RRCA
 	RRCA
@@ -156,4 +191,5 @@ RDADR:				;DE=セクタ(0-255) -> A=ページ(10h+セクタ/16) HL=A000h+(セク
 	RRCA
 	AND	00FH
 	OR	010H
+	LD	E,A
 	RET

@@ -157,4 +157,15 @@ for f in "$D"/LSX2500_80col.d88; do
     if [ "$g1" = "$want" ] && [ "$g2" = "$want" ]; then echo "PASS $(basename $f) ${drv^^}: ${N}ファイル(全域)の先頭と末尾が一致"; else echo "FAIL $(basename $f) ${drv^^}: 全域"; rc=1; fi
   done
 done
+
+# F:から約50KBのCOM(TPAのC000h付近=旧RAMディスクの中継バッファ位置まで)を読み込んで実行できること。自分のデータの和を検算して LOAD OK を出す。
+# バッファがバンク0-5を順に通るので、窓バンク(5/3)の両方の経路を通る
+for f in "$D"/LSX2500_*.d88; do
+  python3 "$HERE/make_big_com.py" /tmp/_big.com 50500
+  python3 "$HERE/make_blank_disk.py" /tmp/_bb.d88 2dd >/dev/null; python3 "$HERE/d88_put.py" /tmp/_bb.d88 /tmp/_big.com BIG.COM
+  out=$("$LSX_CLI" --real-ipl --rom-dir "$LSX_ROMDIR" --disk-a "$f" --disk-b /tmp/_bb.d88 --frames 4500 \
+    --type 'copy b:big.com f:\r:700' --type 'f:big\r:3300' --screen-report 2>&1 | grep '^screen:')
+  if echo "$out" | grep -q "LOAD OK"; then echo "PASS $(basename $f) F:から50KBのCOMを読み込んで実行"
+  else echo "FAIL $(basename $f) F:から50KBのCOMを実行"; echo "$out" | tail -4; rc=1; fi
+done
 exit $rc

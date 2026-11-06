@@ -34,5 +34,3 @@ S27BUF_COM	EQU	S27BUF
 ;	MZ-2500 ハードウェア
 VRAM_PG	EQU	038H		;テキストVRAM/アトリビュート(MB38)
 RAM7_PG	EQU	00FH		;バンク7(E000H-FFFFH)の通常ページ
-RAM5_PG	EQU	00BH		;バンク5(A000H-BFFFH)の通常ページ
-RDBUF	EQU	0C000H		;RAMディスク用の中継バッファ512B(バンク6の先頭。ブート後は未使用域)
