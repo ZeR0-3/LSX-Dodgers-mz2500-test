@@ -1,0 +1,295 @@
+
+;	LSX-Dodgers DISK
+;	MZ-2500
+
+SEEK:
+	LD	B,16
+	LD	C,(IX+DPB_MAXSEC)
+	XOR	A
+	EX	DE,HL
+DIV1:
+	ADD	HL,HL
+	ADC	A,A
+	CP	C
+	JR	C,DIV2
+	SUB	C
+	INC	L
+DIV2:
+	DJNZ	DIV1
+
+	INC	A	;最小のセクタは１固定
+	LD	D,L	;TRACK
+	LD	E,A	;SECTOR
+
+	XOR	A
+	OUT	(0DEH),A	;倍密度
+	LD	A,(_DRIVE)
+	CP	4		;ドライブ1-4(DCHのb1-b0)。3,4は外付け(実機未確認)
+	CCF
+	RET	C
+	OR	084H		;Motor on + ドライブセレクト有効
+	OUT	(0DCH),A	;モータ/ドライブセレクト制御レジスタ
+	SRL	D		;CYLINDER
+	SBC	A,A
+	OUT	(0DDH),A	;ヘッドセレクト制御レジスタ
+
+	CALL	SETMODE
+	RET	C
+
+	CALL	DRIVE
+	CP	0FFH		;A=0FFH Unknown CYLINDER
+	CALL	Z,FDCRES	;Restore
+	CPL			;データバスが負論理
+	OUT	(0D9H),A	;MB8876 トラックレジスタ
+	CPL			;データバスが負論理
+	SUB	D
+	RET	Z		;No seek
+
+	LD	A,(IX+DPB_MAXCYL)
+	DEC	A
+	CP	D		;Over CYLINDER
+	RET	C
+
+	LD	A,D
+	CPL			;データバスが負論理
+	OUT	(0DBH),A	;MB8876 データレジスタ
+	LD	(HL),D
+
+	LD	C,018H		;FDC TypeIコマンド Seek
+FDCCMD2:
+	LD	A,(_SEEKSP)
+	OR	C
+
+FDCCMD:
+	CALL	COMSET
+	LD	A,080H		;FDC COMMAND(Self-modifying code)
+FDCSMC	EQU	$-1
+	AND	020H		;Write data Write track
+	INC	A
+
+SST:
+	LD	C,0
+SST1:
+	DEC	C		; 4
+	JR	NZ,SST1		;12 * 256 / 4 = About 1ms
+	DEC	A
+	JR	NZ,SST1
+
+	LD	C,1
+	CALL	READY
+SETMODE:
+	CALL	DELAY0		;Head select time
+	LD	C,081H
+READY:
+	LD	B,128
+READY2:
+	IN	A,(0D8H)	;MB8876 ステータス/コマンドレジスタ
+	CPL			;データバスが負論理
+	AND	C		;NOT READY,BUSY
+	RET	Z
+	CALL	RD556VSYNC
+	RLCA
+	XOR	B
+	RRCA
+	JR	NC,READY2
+	DJNZ	READY2
+	RET
+
+FDCRES:
+	LD	(HL),0
+	LD	C,8		;FDC TypeIコマンド Restore
+	JR	FDCCMD2
+
+FDMOFF:
+	PUSH	AF
+	XOR	A		;Motor off(ドライブセレクト無効)
+	OUT	(0DCH),A	;モータ/ドライブセレクト制御レジスタ
+	POP	AF
+	RET
+
+SECSET_FDCCMD:
+	LD	A,(FDCSMC)
+SECSET:
+	PUSH	AF
+	LD	A,E
+	CPL			;データバスが負論理
+	OUT	(0DAH),A	;MB8876 セクタレジスタ
+	POP	AF
+COMSET:
+	CPL			;データバスが負論理
+	OUT	(0D8H),A	;MB8876 ステータス/コマンドレジスタ
+DELAY0:
+	LD	A,26
+DELAY:
+	DEC	A
+	JR	NZ,DELAY
+	RET
+
+DRIVE:					;ドライブのシリンダを得る
+	LD	HL,(_DRIVE)
+	LD	H,_CYL0/256
+	SET	7,L
+	LD	A,(HL)
+	RET
+
+RNF:					;ドライブのシリンダをリセット
+	CALL	DRIVE
+	LD	(HL),0FFH
+	RET
+
+RETRY:	DB	2
+
+
+;	FLOPPY DISK DRIVER
+
+WTTRK:
+	LD	B,1
+	LD	A,0F4H		;FDC TypeIIIコマンド Write Track
+	JR	WTTRK1
+FDWT:
+	LD	A,0A0H		;FDC TypeIIコマンド Write Sector
+WTTRK1:
+	LD	(FDCSMC),A
+DWTBL:
+	LD	A,B
+	LD	(WTBSMC),A
+	LD	A,2		;Retry count
+	LD	(RETRY),A
+
+DWT0:
+	PUSH	DE
+	PUSH	HL
+	CALL	SEEK		;Write disk
+	POP	HL
+	JR	C,ERRDW
+	DI
+	CALL	SECSET_FDCCMD
+	LD	C,0DBH		;MB8876 データレジスタ
+DWT1:
+	LD	A,(HL)
+	CPL			;データバスが負論理
+	LD	D,A
+
+DWT2:
+	IN	A,(0D8H)	;MB8876 ステータス/コマンドレジスタ
+	CPL			;データバスが負論理
+	RRCA
+	JR	NC,DWT4
+	RRCA
+	JR	NC,DWT2
+DWT3:
+	OUT	(C),D		;MB8876 データレジスタ
+	INC	HL
+	JR	DWT1
+
+DWT4:
+	DEC	A
+	JR	Z,DWT3
+	INC	A
+	EI
+	POP	DE
+	INC	DE
+	CALL	FDMOFF
+	JR	Z,DISKOK_WT
+	CALL	DISKC
+	JR	NZ,DWT0
+	OR	A
+	JR	NZ,ERRW
+
+DISKOK_WT:
+	LD	B,1
+WTBSMC	EQU	$-1
+	DJNZ	DWTBL
+	RET
+
+ERRW:
+	LD	A,0FFH
+ERRZ:
+	CP	A		;ZF=1
+	SCF
+	JP	FDMOFF
+
+ERRDW:
+	POP	DE
+	CALL	DELP
+	JR	NZ,DWT0
+	OR	A
+	JR	NZ,ERRW
+	RET
+
+FDRD:
+	LD	A,080H		;FDC TypeIIコマンド Read Sector
+	LD	(FDCSMC),A
+DRDBL:
+	LD	A,B
+	LD	(RDBSMC),A
+	LD	A,2		;Retry count
+	LD	(RETRY),A
+DRD0:
+	PUSH	DE
+	PUSH	HL
+	CALL	SEEK		;Read disk
+	POP	HL
+	JR	C,ERRDR
+	DI
+	CALL	SECSET_FDCCMD
+DRD1:
+	IN	A,(0D8H)	;MB8876 ステータス/コマンドレジスタ
+	CPL			;データバスが負論理
+	RRCA
+	JR	NC,DRD3
+	RRCA
+	JR	NC,DRD1
+	IN	A,(0DBH)	;MB8876 データレジスタ
+	CPL			;データバスが負論理
+	LD	(HL),A
+	INC	HL
+	JR	DRD1
+
+DRD3:
+	OR	A
+	EI
+	POP	DE
+	INC	DE
+	CALL	FDMOFF
+	JR	Z,DISKOK_RD
+	CALL	DISKC
+	JR	NZ,DRD0
+	OR	A
+	JR	NZ,ERRW
+
+DISKOK_RD:
+	LD	B,1
+RDBSMC	EQU	$-1
+	DJNZ	DRDBL
+	RET
+
+ERRDR:
+	POP	DE
+	CALL	DELP
+	JR	NZ,DRD0
+	OR	A
+	JR	NZ,ERRW
+	RET
+DISKC:
+	DEC	DE
+	BIT	3,A
+	CALL	NZ,RNF
+DISKD:
+	PUSH	HL
+	LD	HL,RETRY
+	DEC	(HL)
+	POP	HL
+	JR	NZ,ERR		;Retry
+	OR	A
+	JR	Z,ERR		;Error
+
+DELP:
+	CALL	RNF
+	CALL	FDMOFF
+	LD	A,0FFH
+AERRZ:
+	CP	A
+ERR:
+	LD	A,0FFH
+	RET

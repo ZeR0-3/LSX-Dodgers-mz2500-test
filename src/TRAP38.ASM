@@ -1,0 +1,29 @@
+
+;	RST 28H (未初期化領域の実行) の異常終了処理
+;	TRAP38 に配置される
+
+	ORG	TRAP38
+	LD	HL,0
+	EX	(SP),HL
+	LD	A,'$'
+	CALL	MSG_A
+	DEC	HL
+	LD	A,H
+	CALL	PRHX
+	LD	A,L
+PRHX:
+	PUSH	AF
+	RLCA
+	RLCA
+	RLCA
+	RLCA
+	CALL	PRHX2
+	POP	AF
+PRHX2:
+	AND	00FH
+	CP	10
+	CCF
+	ADC	A,'0'
+	DAA
+	JP	MSG_A
+	DS	4

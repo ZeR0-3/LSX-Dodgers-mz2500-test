@@ -1,0 +1,42 @@
+--- /tmp/orig/mz2500-web-emulator-main/core/mz2500.cpp	2026-09-10 14:29:48.000000000 +0000
++++ /home/claude/webemu/mz2500-web-emulator-main/core/mz2500.cpp	2026-10-29 21:29:44.450980073 +0000
+@@ -679,9 +679,13 @@
+                          opn_addr_, v, cpu_.pc);
+         return v;
+     }
+-    case 0xD8: case 0xD9: case 0xDA: case 0xDB:
++    case 0xD8: case 0xD9: case 0xDA: case 0xDB: {
+         charge_fdd_io_wait();
+-        return static_cast<uint8_t>(~fdc_.read((port & 0xFF) - 0xD8, cpu_.cyc));
++        const uint8_t rv = static_cast<uint8_t>(~fdc_.read((port & 0xFF) - 0xD8, cpu_.cyc));
++        if (std::getenv("FDCTRACE") && ((port & 0xFF) != 0xDB || std::getenv("FDCDATA")))
++            std::fprintf(stderr, "[fdc] IN  %02X -> %02X (true %02X) pc=%04X\n", port & 0xFF, rv, (uint8_t)~rv, cpu_.pc);
++        return rv;
++    }
+     case 0xCA:
+         // telephone unit status (MZ-1X09 class option, not installed):
+         // bit7 = POWER "woken by the phone line". The IPL branches to the
+@@ -945,18 +949,23 @@
+     case 0xCF: mem_.set_kanji_bank(value); return;
+     case 0xD8: case 0xD9: case 0xDA: case 0xDB:
+         charge_fdd_io_wait();
++        if (std::getenv("FDCTRACE") && ((port & 0xFF) != 0xDB || std::getenv("FDCDATA")))
++            std::fprintf(stderr, "[fdc] OUT %02X <- %02X (true %02X) pc=%04X\n", port & 0xFF, value, (uint8_t)~value, cpu_.pc);
+         fdc_.write((port & 0xFF) - 0xD8, static_cast<uint8_t>(~value), cpu_.cyc);
+         return;
+     case 0xDC:
+         charge_fdd_io_wait();
++        if (std::getenv("FDCTRACE")) std::fprintf(stderr, "[fdc] OUT DC <- %02X pc=%04X\n", value, cpu_.pc);
+         fdc_.write_drive(value, cpu_.cyc);
+         return;
+     case 0xDD:
+         charge_fdd_io_wait();
++        if (std::getenv("FDCTRACE")) std::fprintf(stderr, "[fdc] OUT DD <- %02X pc=%04X\n", value, cpu_.pc);
+         fdc_.write_side(value, cpu_.cyc);
+         return;
+     case 0xDE:
+         charge_fdd_io_wait();
++        if (std::getenv("FDCTRACE")) std::fprintf(stderr, "[fdc] OUT DE <- %02X pc=%04X\n", value, cpu_.pc);
+         fdc_.set_single_density((value & 0x01) != 0);
+         return;
+     case 0xE0:

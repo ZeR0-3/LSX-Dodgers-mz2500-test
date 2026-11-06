@@ -1,0 +1,395 @@
+
+;	LSX-Dodgers INIT
+;	MZ-2500 : IPLがレコード1-64をページ08h,09h(8000H-BFFFH)に読み込んで
+;	          START(8000H)へジャンプしてくる。(IPLヘッダはレコード0 / build.pyが生成)
+;
+;	起動時マップ(F030h-F036h): バンク0..7 = ページ 00,01,02,03,08,09,06,0F
+;	  0000H-7FFFH : 標準マップ(IOCSが呼び出し後に復元するのでバンク1-3は変えない)
+;	  8000H-BFFFH : このイメージ(ローダ+本体)
+;	  CF06H-       : 本体の転送先(バンク6/7)
+
+	ORG	08000H
+
+START:
+#IF EXISTS KEEP_ENV
+;	IPLの環境(SP=FC00h, EI, IM2)のままIOCSを呼ぶ(ブート時のTINIT呼び出しと同条件)
+#ELSE
+	DI
+	LD	SP,0CE00H
+#ENDIF
+#IF EXISTS DEBUG_MARK
+	LD	A,'1'
+	CALL	MARK
+#ENDIF
+#IF EXISTS USE_TINIT
+#IF EXISTS COLS80
+	LD	A,008H			;80桁/25行/16x8フォント
+#ELSE
+	LD	A,009H			;ブート時と同じ: 40桁/25行/16x8フォント
+#ENDIF
+	OR	A			;Cy=0
+	RST	18H
+	DB	064H			;IOCS TINIT (FNTSEL/F7h/CRTCを正しい状態にする)
+	DI
+#ELSE
+#IF EXISTS COLS80
+;	IOCSを使わず直接80桁にする(TINIT A=08h と同じポート書き込み。実IPLのトレースで確認:
+;	E8h 48h->68h(bit5=CH80)、CRTC レジスタ7=09h・8=59h(横表示範囲)。他のポートは40桁と同じ)
+	IN	A,(0E8H)
+	OR	020H			;CH80=1
+	OUT	(0E8H),A
+	LD	A,7
+	OUT	(0F4H),A
+	LD	A,009H
+	OUT	(0F5H),A
+	LD	A,8
+	OUT	(0F4H),A
+	LD	A,059H
+	OUT	(0F5H),A
+#ENDIF
+#ENDIF
+#IF EXISTS DEBUG_MARK
+	LD	A,'2'
+	CALL	MARK
+#ENDIF
+	DI
+	LD	SP,0CE00H
+	LD	A,008H
+	OUT	(0C6H),A		;VBLANKだけ許可(RTC/プリンタ/タイマは止める)。E1h bit0 を動かすために必要
+	IM	1			;IOCS(IM2/I=02h)を使い終えてから変更する
+	CALL	INIT			;NZならAUTOEXECを実行
+	LD	HL,0
+	PUSH	HL
+	RET	Z
+	LD	DE,AUTOD
+	JP	_COMANL
+
+INIT:
+;	MONコマンド用に、IOCSのRAM(0000h-25FFh)をページ0Ch,0Dhへ退避(LSXが書き換える前の、TINIT後の状態)
+	LD	A,2
+	OUT	(0B4H),A
+	LD	A,00CH
+	OUT	(0B5H),A
+	LD	A,00DH
+	OUT	(0B5H),A		;バンク2,3 = ページ0Ch,0Dh (04000h-07FFFh)
+	LD	HL,0
+	LD	DE,04000H
+	LD	BC,02600H
+	LDIR
+	LD	A,2
+	OUT	(0B4H),A
+	LD	A,002H
+	OUT	(0B5H),A
+	LD	A,003H
+	OUT	(0B5H),A		;標準に戻す
+	LD	HL,INITE
+	LD	DE,BDOS
+	LD	BC,BODYLEN
+	LDIR
+	CALL	MEMDISK			;E:(EMM) / F:(拡張RAM) の検出とDPB設定
+#IF EXISTS DEBUG_MARK
+	LD	A,'3'
+	CALL	MARK
+#ENDIF
+
+	LD	HL,0
+	LD	B,05CH
+	DB	03EH			;LD A,??
+	RST	28H
+	CALL	FILL_MEMORY
+	LD	B,0A4H
+	XOR	A
+	LD	(_DVSW),A
+	CALL	FILL_MEMORY
+
+	LD	A,0C3H			;JP
+	LD	HL,CPM_WBOOT
+	LD	(00000H),A
+	LD	(00001H),HL		;IPL
+
+	LD	HL,BDOS
+	LD	(00005H),A
+	LD	(00006H),HL		;BDOS
+
+	LD	HL,TRAP38		;TRAP38
+	LD	(00028H),A
+	LD	(00029H),HL		;RST 028H
+
+	LD	(00038H),A
+	LD	HL,IO_INT8253
+	LD	(00039H),HL
+
+	LD	HL,_DISKE+1
+	LD	(DISKVE),HL
+	LD	HL,_BREAK+1
+	LD	(BREAKV),HL
+
+	LD	A,CPM_BOOT/256
+	LD	(0000BH),A
+
+	LD	A,0E9H			;JP (HL)
+	LD	(0000FH),A
+
+	LD	HL,INIMES
+	CALL	MSX
+#IF EXISTS DEBUG_MARK
+	LD	A,'4'
+	CALL	MARK
+#ENDIF
+INIT1:
+	DI
+	LD	DE,0FF00H
+	LD	B,0
+	CALL	ZERO_MEMORY_DE
+	LD	HL,EXTBIO
+	LD	(HL),0C9H		;RET
+	INC	HL
+	LD	B,TRAP38-EXTBIO-1
+	DB	03EH			;LD A,??
+	RST	28H
+	CALL	FILL_MEMORY
+	LD	HL,TRAP38_IMG
+	LD	DE,TRAP38
+	LD	BC,TRAP38_IMGE-TRAP38_IMG
+	LDIR
+
+#IF EXISTS DEBUG_MARK
+	LD	A,'5'
+	CALL	MARK
+#ENDIF
+	CALL	CHKEY
+	CP	3
+	RET
+
+#IF EXISTS DEBUG_MARK
+;	進捗マーカー: 12行目に A の文字を1桁ずつ並べる(バンク3を一時的にVRAMへ)
+;	本体のVRAMルーチンに依存しないので、本体が動く前の状態確認に使える
+MARK:
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	LD	C,A
+	LD	A,3
+	OUT	(0B4H),A
+	LD	A,VRAM_PG
+	OUT	(0B5H),A		;バンク3(6000H-)=テキストVRAM
+	LD	HL,06000H+12*WIDTH
+MKCOL	EQU	$-2
+	LD	A,C
+	ADD	A,A
+	ADD	A,A
+	LD	(HL),A			;Text1 (16ライン文字)
+	LD	DE,00800H
+	ADD	HL,DE
+	LD	(HL),COLORF		;Attribute
+	ADD	HL,DE
+	LD	A,C
+	RLCA
+	RLCA
+	AND	3
+	OR	08CH
+	LD	(HL),A			;Text2
+	LD	HL,(MKCOL)
+	INC	HL
+	LD	(MKCOL),HL
+	LD	A,3
+	OUT	(0B4H),A
+	LD	A,3
+	OUT	(0B5H),A		;バンク3をRAM(ページ03)へ戻す
+	POP	HL
+	POP	DE
+	POP	BC
+	RET
+#ENDIF
+
+;	E:(EMM) と F:(RAMディスク) の検出
+;	  DPBは本体(INITE)をBDOSへ転送した後の _DEVICE を書き換える。見つからなければ DPB_FATLN=0(未使用)のまま。
+MEMDISK:
+;---- EMM: 64KB単位のブロック数Nを調べる(最大10=640KB)。各ブロック先頭1バイトを反転して書き戻せるか確かめ、
+;     ブロック0の先頭が変わったらアドレスの折り返し(=そのブロックは無い)とみなす。確認後は元の値に戻す。
+	XOR	A
+	CALL	EMMSEL
+	IN	E,(C)			;E=ブロック0先頭の元の値
+	LD	D,0			;D=ブロック数
+EMMD1:
+	LD	A,D
+	CP	10
+	JR	NC,EMMD9
+	CALL	EMMSEL
+	IN	H,(C)			;H=元の値
+	LD	A,H
+	CPL
+	LD	L,A
+	OUT	(C),L			;反転値を書く
+	IN	A,(C)
+	CP	L
+	JR	NZ,EMMDX		;書けない -> ここから先は無い
+	LD	A,D
+	OR	A
+	JR	Z,EMMDOK
+	XOR	A
+	CALL	EMMSEL
+	IN	A,(C)
+	CP	E
+	JR	NZ,EMMDA		;ブロック0が変わった -> 折り返し
+EMMDOK:
+	LD	A,D
+	CALL	EMMSEL
+	OUT	(C),H			;元に戻す
+	INC	D
+	JR	EMMD1
+EMMDA:
+	XOR	A
+	CALL	EMMSEL
+	OUT	(C),E			;ブロック0を元に戻す
+	JR	EMMD9
+EMMDX:
+	LD	A,D
+	CALL	EMMSEL
+	OUT	(C),H
+EMMD9:
+	LD	A,D
+	OR	A
+	JR	Z,RAMDSK
+;     DPB(E:)の設定: セクタ数=128N(512B) FAT=ceil(192N/512) ルート8 MAXCL=128N-FAT-7 DIRPS=FAT+1 ADDCL=FAT+7
+	LD	IX,_DEVICE+32*4
+	LD	L,A
+	LD	H,0
+	ADD	HL,HL
+	ADD	HL,HL
+	ADD	HL,HL
+	ADD	HL,HL
+	ADD	HL,HL
+	ADD	HL,HL			;HL=64N
+	LD	D,H
+	LD	E,L
+	ADD	HL,HL			;128N
+	PUSH	HL
+	ADD	HL,DE			;192N
+	LD	DE,511
+	ADD	HL,DE
+	LD	A,H
+	SRL	A			;A=FATセクタ数
+	LD	(IX+DPB_FATLN),A
+	LD	E,A
+	LD	D,0
+	INC	A
+	LD	(IX+DPB_DIRPS),A
+	ADD	A,6
+	LD	(IX+DPB_ADDCL),A
+	POP	HL			;128N
+	OR	A
+	SBC	HL,DE			;-FAT
+	LD	DE,7
+	OR	A
+	SBC	HL,DE
+	LD	(IX+DPB_MAXCL),L
+	LD	(IX+DPB_MAXCL+1),H
+
+;---- RAMディスク: 拡張RAMのページ10hと1Fhが実在するか(バンク2,3へ割り当てて反転書き込みを確認。1Fhが10hの折り返しでないことも確認)
+RAMDSK:
+	LD	A,2
+	OUT	(0B4H),A
+	LD	A,01FH
+	OUT	(0B5H),A		;バンク2(4000H-)=ページ1Fh
+	LD	A,010H
+	OUT	(0B5H),A		;バンク3(6000H-)=ページ10h
+	LD	A,(06000H)
+	LD	E,A			;E=ページ10h先頭の元の値
+	LD	A,(04000H)
+	LD	H,A			;H=ページ1Fh先頭の元の値
+	CPL
+	LD	L,A
+	LD	(04000H),A
+	LD	A,(04000H)
+	CP	L
+	JR	NZ,RAMNO
+	LD	A,(06000H)
+	CP	E
+	JR	NZ,RAMNO		;ページ10hが変わった -> 折り返し
+	LD	A,E
+	CPL
+	LD	D,A
+	LD	(06000H),A
+	LD	A,(06000H)
+	CP	D
+	JR	NZ,RAMNO
+	LD	A,E
+	LD	(06000H),A
+	LD	A,H
+	LD	(04000H),A		;元に戻す
+;     あり: 先頭にタグ(8B)とFAT先頭(FAh,FFh,FFh)があれば前回の内容を残す。無ければフォーマット(セクタ0-9を0にしてタグとFAT先頭を書く)
+	LD	HL,06000H
+	LD	DE,RDTAG
+	LD	B,8
+RAMT1:
+	LD	A,(DE)
+	CP	(HL)
+	JR	NZ,RAMFMT
+	INC	HL
+	INC	DE
+	DJNZ	RAMT1
+	LD	A,(06200H)
+	CP	0FAH
+	JR	Z,RAMOK
+RAMFMT:
+	LD	HL,06000H
+	LD	DE,06001H
+	LD	BC,01400H-1
+	LD	(HL),0
+	LDIR				;セクタ0-9(予約1+FAT1+ルート8)を0に
+	LD	HL,RDTAG
+	LD	DE,06000H
+	LD	BC,8
+	LDIR
+	LD	HL,06200H
+	LD	(HL),0FAH
+	INC	HL
+	LD	(HL),0FFH
+	INC	HL
+	LD	(HL),0FFH
+RAMOK:
+	LD	A,1
+	LD	(_DEVICE+32*5+DPB_FATLN),A	;F:を有効に
+	JR	RAMEND
+RAMNO:
+	LD	A,E
+	LD	(06000H),A
+	LD	A,H
+	LD	(04000H),A
+RAMEND:
+	LD	A,2
+	OUT	(0B4H),A
+	LD	A,002H
+	OUT	(0B5H),A
+	LD	A,003H
+	OUT	(0B5H),A		;バンク2,3を標準に戻す
+	RET
+
+EMMSEL:				;A=ブロック(0-15)の先頭アドレスを選択。B=0 C=0ADh で戻る
+	LD	B,A
+	XOR	A
+	LD	C,0ACH
+	OUT	(C),A
+	LD	B,0
+	LD	C,0ADH
+	RET
+
+RDTAG:	DB	"LSX25RD",0
+
+AUTOD:	DB	"AUTOEXEC "
+AUTODV:	DB	"A:",0
+
+INIMES:	DB	00CH,"LSX-Dodgers for MZ-2500 v"
+	DB	030H + VER_1, '.'
+	DB	030H + VER_2 ,030H + VER_3
+	DB	'b'
+	DB	" Gaku",0DH,0AH
+	DB	0
+
+TRAP38_IMG:
+	INCBIN	"trap38.bin"
+TRAP38_IMGE:
+
+INITE:
+	INCBIN	"body25.bin"
